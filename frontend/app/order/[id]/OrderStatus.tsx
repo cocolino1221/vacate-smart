@@ -5,11 +5,14 @@ import { MEALS, api, fmtDate, money } from '@/lib/api';
 
 interface Order {
   id: string; reference: string; status: string; currency: string; total: number;
+  mode: 'link' | 'merchant'; paymentLink: string | null;
   customer: { firstName: string; email: string };
   items: { product: string; status: string; price: number; supplierOrderId: string | null; details: Record<string, any> }[];
 }
 
 const LABELS: Record<string, [string, string]> = {
+  AWAITING_LINK: ['Cerere primită – îți trimitem linkul de plată pe email în cel mai scurt timp', 'var(--warn)'],
+  LINK_SENT: ['Camera e disponibilă – finalizează plata', 'var(--warn)'],
   PENDING_PAYMENT: ['Așteaptă plata', 'var(--warn)'],
   PAID: ['Plată primită – confirmăm rezervarea…', 'var(--warn)'],
   CONFIRMED: ['Rezervare confirmată ✓', 'var(--accent)'],
@@ -49,6 +52,12 @@ export default function OrderStatus({ id, token, cancelled }: { id: string; toke
   return (
     <>
       <p className="status" style={{ color }}>{cancelled && order.status === 'PENDING_PAYMENT' ? 'Plata a fost anulată.' : label}</p>
+      {order.paymentLink && (
+        <p>
+          <a className="btn" href={order.paymentLink} target="_blank" rel="noopener noreferrer">Plătește în siguranță</a>
+          <br /><span className="small muted">Plata se face direct către furnizorul de servicii turistice. Vacate Smart acționează ca intermediar.</span>
+        </p>
+      )}
       <p className="muted">Referință: <b>{order.reference}</b> · Confirmarea se trimite la {order.customer.email}</p>
       {order.items.map((i, k) => (
         <div className="card" key={k} style={{ marginBottom: 12 }}>

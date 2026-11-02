@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api, money, parseRooms } from '@/lib/api';
 
@@ -22,6 +22,11 @@ export default function CheckoutForm() {
   const [agree, setAgree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState<'link' | 'merchant'>('link');
+
+  useEffect(() => {
+    api<{ salesMode: 'link' | 'merchant' }>('/config').then((c) => setMode(c.salesMode)).catch(() => {});
+  }, []);
 
   const setGuest = (ri: number, gi: number, g: Partial<Guest>) =>
     setGuests(guests.map((room, i) => (i !== ri ? room : room.map((x, j) => (j === gi ? { ...x, ...g } : x)))));
@@ -109,13 +114,31 @@ export default function CheckoutForm() {
         </div>
       ))}
 
+      {mode === 'link' && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <b>Cum funcționează</b>
+          <ol className="small" style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+            <li>Trimiți cererea – nu plătești nimic acum.</li>
+            <li>Verificăm disponibilitatea și îți trimitem pe email un <b>link securizat de plată</b>.</li>
+            <li>Plătești cu cardul direct către furnizorul de servicii turistice și primești confirmarea.</li>
+          </ol>
+          <p className="small muted" style={{ marginBottom: 0 }}>
+            Vacate Smart acționează ca intermediar. Prețul final este cel din linkul de plată.
+          </p>
+        </div>
+      )}
+
       <label style={{ display: 'flex', gap: 8, alignItems: 'start', color: 'var(--text)' }}>
         <input type="checkbox" style={{ width: 'auto', marginTop: 4 }} checked={agree} onChange={(e) => setAgree(e.target.checked)} required />
         <span>Am citit și accept <a href="/termeni" target="_blank">Termenii și condițiile</a>, politica de anulare a tarifului și <a href="/confidentialitate" target="_blank">Politica de confidențialitate</a>.</span>
       </label>
       {error && <p className="error">{error}</p>}
       <button className="btn" style={{ marginTop: 16, width: '100%' }} disabled={busy || !agree}>
-        {busy ? 'Verificăm disponibilitatea…' : `Plătește ${money(price, currency)}`}
+        {busy
+          ? 'Verificăm disponibilitatea…'
+          : mode === 'link'
+            ? 'Trimite cererea de rezervare'
+            : `Plătește ${money(price, currency)}`}
       </button>
     </form>
   );

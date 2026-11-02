@@ -25,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="container">{children}</main>
         <footer className="site">
           <div className="container">
-            <span>© {new Date().getFullYear()} Vacate Smart · Licență de turism nr. ______</span>
+            <span>© {new Date().getFullYear()} Vacate Smart · Intermediar de servicii turistice. Serviciile sunt furnizate și plătite direct la partenerii noștri.</span>
             <span>
               <Link href="/termeni">Termeni și condiții</Link> · <Link href="/confidentialitate">Confidențialitate</Link> ·{' '}
               <a href="https://anpc.ro" target="_blank" rel="noreferrer">ANPC</a>

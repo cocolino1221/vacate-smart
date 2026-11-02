@@ -11,7 +11,28 @@ Platformă de rezervări online (OTA) pentru hoteluri, zboruri, transferuri și 
 | Transferuri | 🟡 schelet pregătit (`backend/src/products/transfers`) |
 | Trenuri | 🟡 schelet pregătit (`backend/src/products/rail`) |
 
-## Cum circulă banii (model `deposit`, cu linia de credit RateHawk)
+## Două moduri de vânzare (`SALES_MODE`)
+
+### `link`: intermediar (implicit, nu necesită încasare proprie)
+
+```
+Client ──caută și trimite cererea──► Vacate Smart (site)
+Agent  ──creează rezervarea + link de plată (pay-by-link, comision propriu)──► RateHawk
+Agent  ──lipește linkul în /admin──► clientul îl primește pe email și pe pagina comenzii
+Client ──plătește cu cardul──► direct la RateHawk
+RateHawk ──comisionul vostru──► firmă (retragere din back-office)
+```
+
+Pașii zilnici în panoul `https://DOMENIU/admin`, cu autentificare prin `ADMIN_TOKEN`:
+1. Apare o cerere nouă în tab-ul **Așteaptă link** și primiți email la `ADMIN_EMAIL`.
+2. În RateHawk căutați același hotel, cameră și date. Puneți comisionul (panoul vă arată comisionul recomandat, ca prețul să fie cel afișat clientului) și generați linkul de plată.
+3. Lipiți linkul și apăsați **Trimite linkul clientului**.
+4. După ce clientul plătește în RateHawk, introduceți nr. comenzii RateHawk și apăsați **Marchează plătită / confirmată**. Clientul primește confirmarea.
+5. Dacă hotelul nu mai e disponibil, apăsați **Respinge** și clientul primește motivul pe email.
+
+În acest mod nu se apelează booking/finish prin API: API-ul e folosit doar pentru căutare, prețuri și verificare (prebook).
+
+### `merchant`: vânzător (după obținerea licenței de turism)
 
 ```
 Client ──(preț vânzare = net + adaos)──► Stripe ──► contul vostru
@@ -109,6 +130,9 @@ Toate cererile au header-ul `Authorization: Bearer <ADMIN_TOKEN>`.
 | Metodă | Endpoint | Ce face |
 |---|---|---|
 | GET | `/api/admin/orders?status=&q=` | listă comenzi (căutare după referință / email) |
+| POST | `/api/admin/orders/:id/payment-link` | (mod link) `{"url": "https://…"}`: trimite linkul de plată clientului |
+| POST | `/api/admin/orders/:id/confirm` | (mod link) `{"supplierOrderId": "…"}`: marchează confirmată |
+| POST | `/api/admin/orders/:id/reject` | (mod link) `{"reason": "…"}`: respinge cererea |
 | POST | `/api/admin/orders/:id/cancel` | anulare la RateHawk (rambursarea către client se face manual, în funcție de penalități) |
 | GET | `/api/admin/markup` | adaosul curent pe produs |
 | PUT | `/api/admin/markup/HOTEL` | `{"percent": 12, "fixed": 0}` |
@@ -118,12 +142,12 @@ Toate cererile au header-ul `Authorization: Bearer <ADMIN_TOKEN>`.
 
 - [ ] **Certificare RateHawk.** Cereți checklist-ul de la account manager. Platforma afișează deja politica de anulare, taxele de plătit la hotel, masa și numele oaspeților.
 - [ ] Chei de producție RateHawk; linia de credit este activă pe tipul de plată `deposit`.
-- [ ] Licență de turism (completați numărul în footer, `frontend/app/layout.tsx`).
+- [ ] Licență de turism (agenție intermediară/online), necesară pentru `SALES_MODE=merchant` și recomandată și în modul `link`. Completați numărul în footer, în `frontend/app/layout.tsx`.
 - [ ] Termeni și condiții, politica de confidențialitate (GDPR), cookie banner.
 - [ ] Asigurare de insolvență, dacă vindeți pachete (zbor + hotel).
 - [ ] Facturare automată (SmartBill / Oblio) la confirmarea comenzii. **Nu este încă implementată.**
 - [ ] Backup zilnic PostgreSQL și monitorizare (Sentry / Uptime Kuma).
-- [ ] Panou admin vizual. Momentan există doar API-ul de admin.
+- [x] Panou admin vizual minimal la `/admin` (cereri, link de plată, confirmare).
 
 ## Următorii pași
 

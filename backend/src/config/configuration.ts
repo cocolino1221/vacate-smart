@@ -19,6 +19,12 @@ export default () => ({
     TRANSFER: parseFloat(process.env.MARKUP_TRANSFER_PERCENT ?? '12'),
     RAIL: parseFloat(process.env.MARKUP_RAIL_PERCENT ?? '5'),
   },
+  /**
+   * link     = intermediar: clientul trimite cererea, agentul creează în RateHawk un link de plată
+   *            (pay-by-link, cu comisionul ales) și îl trimite din admin. Banii NU trec prin firmă.
+   * merchant = clientul plătește la noi (Stripe), noi plătim RateHawk din linia de credit. Necesită licență.
+   */
+  salesMode: process.env.SALES_MODE === 'merchant' ? 'merchant' : 'link',
   payments: {
     provider: process.env.PAYMENT_PROVIDER ?? 'stripe', // stripe | test
     stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? '',

@@ -75,14 +75,14 @@ export default async function HotelPage({
                 </div>
                 <div className="price" style={{ padding: 0 }}>
                   <strong>{money(r.sellAmount, r.currency)}</strong>
-                  <span className="muted small">total, taxe incluse*</span>
+                  <span className="muted small">total estimat*</span>
                   <Link className="btn" href={`/checkout?${q}`}>Rezervă</Link>
                 </div>
               </div>
             );
           })}
       </div>
-      <p className="muted small">* cu excepția taxelor locale menționate ca plătibile la hotel.</p>
+      <p className="muted small">* Include taxele, cu excepția celor locale menționate ca plătibile la hotel. Prețul final este confirmat la plată.</p>
 
       {details?.description.map((d, i) => (
         <section key={i}>

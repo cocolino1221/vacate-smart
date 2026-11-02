@@ -1,5 +1,5 @@
 import { Controller, Get, Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -17,11 +17,19 @@ import { RailModule } from './products/rail/rail.module';
 import { OrdersModule } from './orders/orders.module';
 import { AdminModule } from './admin/admin.module';
 
-@Controller('health')
+@Controller()
 class HealthController {
-  @Get()
+  constructor(private readonly config: ConfigService) {}
+
+  @Get('health')
   health() {
     return { ok: true, time: new Date().toISOString() };
+  }
+
+  /** Setări publice pentru frontend. */
+  @Get('config')
+  publicConfig() {
+    return { salesMode: this.config.get('salesMode'), currency: this.config.get('defaults.currency') };
   }
 }
 

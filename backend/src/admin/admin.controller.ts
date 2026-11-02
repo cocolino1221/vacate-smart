@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseEnumPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { OrderStatus, ProductType } from '@prisma/client';
-import { IsNumber, Max, Min } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 import { AdminGuard } from './admin.guard';
 import { OrdersService } from '../orders/orders.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,6 +9,17 @@ import { PricingService } from '../pricing/pricing.service';
 class MarkupDto {
   @IsNumber() @Min(0) @Max(100) percent: number;
   @IsNumber() @Min(0) fixed: number;
+}
+
+class PaymentLinkDto {
+  @IsString() @Length(10, 2000) url: string;
+  @IsOptional() @IsString() @MaxLength(1000) note?: string;
+}
+class ConfirmDto {
+  @IsOptional() @IsString() @MaxLength(100) supplierOrderId?: string;
+}
+class RejectDto {
+  @IsString() @Length(3, 500) reason: string;
 }
 
 @Controller('admin')
@@ -28,6 +39,21 @@ export class AdminController {
   @Post('orders/:id/cancel')
   cancel(@Param('id') id: string) {
     return this.orders.cancel(id);
+  }
+
+  @Post('orders/:id/payment-link')
+  sendLink(@Param('id') id: string, @Body() dto: PaymentLinkDto) {
+    return this.orders.sendPaymentLink(id, dto.url, dto.note);
+  }
+
+  @Post('orders/:id/confirm')
+  confirm(@Param('id') id: string, @Body() dto: ConfirmDto) {
+    return this.orders.confirmLinkOrder(id, dto.supplierOrderId ?? '');
+  }
+
+  @Post('orders/:id/reject')
+  reject(@Param('id') id: string, @Body() dto: RejectDto) {
+    return this.orders.rejectLinkOrder(id, dto.reason);
   }
 
   @Get('markup')

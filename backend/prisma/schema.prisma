@@ -15,6 +15,8 @@ enum ProductType {
 }
 
 enum OrderStatus {
+  AWAITING_LINK   // (mod link) cerere primită, agentul trebuie să genereze linkul de plată în RateHawk
+  LINK_SENT       // (mod link) linkul de plată RateHawk a fost trimis clientului
   PENDING_PAYMENT // creată, așteaptă plata
   PAID            // plătită, se rezervă la furnizor
   CONFIRMED       // toate produsele confirmate de RateHawk
@@ -54,6 +56,10 @@ model Order {
   customerLastName  String
   customerComment   String?
   language          String      @default("ro")
+  // "link" = intermediar, clientul plătește direct la RateHawk prin link; "merchant" = încasăm noi (Stripe)
+  salesMode         String      @default("merchant")
+  paymentLink       String?
+  adminNote         String?
   userIp            String?
   items             OrderItem[]
   payments          Payment[]

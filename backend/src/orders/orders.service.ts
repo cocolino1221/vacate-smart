@@ -37,6 +37,10 @@ export class OrdersService {
     this.providers = new Map(providers.map((p) => [p.product, p]));
   }
 
+  get salesMode(): 'link' | 'merchant' {
+    return this.config.get('salesMode') === 'merchant' ? 'merchant' : 'link';
+  }
+
   private newPartnerOrderId() {
     const d = new Date().toISOString().slice(2, 10).replace(/-/g, '');
     return `VS${d}${randomBytes(4).toString('hex').toUpperCase()}`;
@@ -52,12 +56,16 @@ export class OrdersService {
 
       const partnerOrderId = this.newPartnerOrderId();
       const supplierRef = `${partnerOrderId}-H1`;
-      const form = await this.hotels.bookingForm(supplierRef, rate.bookHash, language, userIp);
+      const linkMode = this.salesMode === 'link';
+      // În modul intermediar rezervarea se face manual în RateHawk (pay-by-link), nu prin API.
+      const form = linkMode ? null : await this.hotels.bookingForm(supplierRef, rate.bookHash, language, userIp);
 
       const order = await this.prisma.order.create({
         data: {
           partnerOrderId,
           accessToken: randomBytes(24).toString('hex'),
+          status: linkMode ? OrderStatus.AWAITING_LINK : OrderStatus.PENDING_PAYMENT,
+          salesMode: this.salesMode,
           currency: rate.currency,
           netAmount: rate.netAmount,
           sellAmount: rate.sellAmount,
@@ -72,10 +80,10 @@ export class OrdersService {
             create: {
               product: ProductType.HOTEL,
               supplierRef,
-              supplierOrderId: form.orderId,
-              supplierItemId: form.itemId,
+              supplierOrderId: form?.orderId,
+              supplierItemId: form?.itemId,
               bookHash: rate.bookHash,
-              paymentType: form.paymentType.type,
+              paymentType: form?.paymentType.type ?? 'link',
               netAmount: rate.netAmount,
               sellAmount: rate.sellAmount,
               currency: rate.currency,
@@ -95,16 +103,33 @@ export class OrdersService {
                 freeCancellationBefore: rate.freeCancellationBefore,
                 cancellationPolicies: rate.cancellationPolicies,
                 rooms: dto.rooms,
-                supplierPayment: {
-                  type: form.paymentType.type,
-                  amount: form.paymentType.amount,
-                  currency_code: form.paymentType.currency_code,
-                },
+                supplierPayment: form
+                  ? {
+                      type: form.paymentType.type,
+                      amount: form.paymentType.amount,
+                      currency_code: form.paymentType.currency_code,
+                    }
+                  : null,
               } as unknown as Prisma.InputJsonValue,
             },
           },
         },
       });
+
+      if (linkMode) {
+        const full = await this.prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { items: true } });
+        await this.mail.linkRequestReceived(full);
+        await this.mail.adminNewLinkRequest(full);
+        return {
+          orderId: order.id,
+          token: order.accessToken,
+          checkoutUrl: `${this.config.get('publicUrl')}/order/${order.id}?token=${order.accessToken}`,
+          priceChanged,
+          amount: rate.sellAmount,
+          currency: rate.currency,
+          mode: 'link' as const,
+        };
+      }
 
       const checkout = await this.payments.createCheckout(order, `${info?.name ?? 'Hotel'} – ${rate.roomName}`);
       await this.prisma.payment.create({
@@ -129,6 +154,7 @@ export class OrdersService {
         priceChanged,
         amount: rate.sellAmount,
         currency: rate.currency,
+        mode: 'merchant' as const,
       };
     } catch (e) {
       throw toHttpError(e);
@@ -280,6 +306,8 @@ export class OrdersService {
       status: order.status,
       currency: order.currency,
       total: Number(order.sellAmount),
+      mode: order.salesMode,
+      paymentLink: order.status === OrderStatus.LINK_SENT ? order.paymentLink : null,
       customer: { firstName: order.customerFirstName, lastName: order.customerLastName, email: order.customerEmail },
       createdAt: order.createdAt,
       items: order.items.map((i) => {
@@ -320,6 +348,11 @@ export class OrdersService {
   async cancel(orderId: string): Promise<FullOrder> {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE });
     if (!order) throw new NotFoundException();
+    if (order.salesMode === 'link') {
+      // rezervarea (dacă există) a fost făcută manual în RateHawk – anularea se face tot acolo
+      await this.prisma.orderItem.updateMany({ where: { orderId }, data: { status: ItemStatus.CANCELLED } });
+      return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED }, include: ORDER_INCLUDE });
+    }
     const confirmed = order.items.filter((i) => i.status === ItemStatus.CONFIRMED);
     if (!confirmed.length) throw new BadRequestException('Nu există rezervări confirmate de anulat');
     for (const item of confirmed) {
@@ -331,5 +364,54 @@ export class OrdersService {
       await this.prisma.orderItem.update({ where: { id: item.id }, data: { status: ItemStatus.CANCELLED } });
     }
     return this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CANCELLED }, include: ORDER_INCLUDE });
+  }
+
+  // ---------------- mod intermediar (link de plată RateHawk) ----------------
+
+  private async linkOrder(orderId: string, allowed: OrderStatus[]) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE });
+    if (!order) throw new NotFoundException();
+    if (order.salesMode !== 'link') throw new BadRequestException('Comanda nu este în modul link');
+    if (!allowed.includes(order.status)) throw new BadRequestException(`Acțiune imposibilă din statusul ${order.status}`);
+    return order;
+  }
+
+  /** Agentul a generat linkul de plată în RateHawk și îl trimite clientului. */
+  async sendPaymentLink(orderId: string, url: string, note?: string) {
+    const parsed = (() => { try { return new URL(url); } catch { return null; } })();
+    if (!parsed || parsed.protocol !== 'https:') throw new BadRequestException('Link invalid (trebuie să înceapă cu https://)');
+    await this.linkOrder(orderId, [OrderStatus.AWAITING_LINK, OrderStatus.LINK_SENT]);
+    const order = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.LINK_SENT, paymentLink: parsed.toString(), adminNote: note ?? undefined },
+      include: ORDER_INCLUDE,
+    });
+    await this.mail.paymentLink(order, order.items);
+    return order;
+  }
+
+  /** Clientul a plătit în RateHawk și rezervarea e confirmată acolo. */
+  async confirmLinkOrder(orderId: string, supplierOrderId: string) {
+    const o = await this.linkOrder(orderId, [OrderStatus.LINK_SENT, OrderStatus.AWAITING_LINK]);
+    await this.prisma.orderItem.updateMany({
+      where: { orderId: o.id },
+      data: { status: ItemStatus.CONFIRMED, supplierOrderId: supplierOrderId || null },
+    });
+    const order = await this.prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.CONFIRMED }, include: ORDER_INCLUDE });
+    await this.mail.orderConfirmed(order, order.items);
+    return order;
+  }
+
+  /** Cererea nu poate fi onorată (cameră indisponibilă, client nu a plătit etc.). */
+  async rejectLinkOrder(orderId: string, reason: string) {
+    await this.linkOrder(orderId, [OrderStatus.AWAITING_LINK, OrderStatus.LINK_SENT]);
+    await this.prisma.orderItem.updateMany({ where: { orderId }, data: { status: ItemStatus.CANCELLED, errorMessage: reason } });
+    const order = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { status: OrderStatus.CANCELLED, adminNote: reason },
+      include: ORDER_INCLUDE,
+    });
+    await this.mail.requestRejected(order, reason);
+    return order;
   }
 }

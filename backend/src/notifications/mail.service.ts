@@ -69,4 +69,66 @@ export class MailService {
   async adminAlert(subject: string, body: string) {
     await this.send(this.config.get<string>('mail.adminEmail') ?? '', `[Vacate Smart] ${subject}`, `<pre>${esc(body)}</pre>`);
   }
+
+  // ---------- mod intermediar ----------
+
+  private itemsHtml(items: OrderItem[]) {
+    return items
+      .map((i) => {
+        const d = i.details as Record<string, any>;
+        const guests = (d.rooms ?? [])
+          .map((r: any, k: number) => `Camera ${k + 1}: ${r.guests.map((g: any) => `${esc(g.firstName)} ${esc(g.lastName)}${g.isChild ? ` (copil ${g.age} ani)` : ''}`).join(', ')}`)
+          .join('<br/>');
+        return `<li><b>${esc(d.title)}</b> (hid ${esc(d.hid)})<br/>${esc(d.roomName)} · ${esc(d.meal)}<br/>
+          ${esc(d.checkin)} → ${esc(d.checkout)}<br/>${guests}<br/>Preț afișat clientului: <b>${Number(i.sellAmount).toFixed(2)} ${esc(i.currency)}</b>
+          (net RateHawk: ${Number(i.netAmount).toFixed(2)})</li>`;
+      })
+      .join('');
+  }
+
+  async linkRequestReceived(order: Order & { items: OrderItem[] }) {
+    await this.send(
+      order.customerEmail,
+      `Am primit cererea ta de rezervare #${order.partnerOrderId}`,
+      `<p>Bună, ${esc(order.customerFirstName)}!</p>
+       <p>Am primit cererea ta. Verificăm disponibilitatea și îți trimitem în cel mai scurt timp <b>linkul securizat de plată</b>.</p>
+       <p>Plata se face direct către furnizorul de servicii turistice; Vacate Smart acționează ca intermediar.</p>
+       <p><a href="${this.orderLink(order)}">Urmărește cererea</a></p>`,
+    );
+  }
+
+  async adminNewLinkRequest(order: Order & { items: OrderItem[] }) {
+    const admin = `${this.config.get('publicUrl')}/admin`;
+    await this.send(
+      this.config.get<string>('mail.adminEmail') ?? '',
+      `[Vacate Smart] Cerere nouă #${order.partnerOrderId} – generează link de plată`,
+      `<p><b>Client:</b> ${esc(order.customerFirstName)} ${esc(order.customerLastName)} · ${esc(order.customerEmail)} · ${esc(order.customerPhone)}</p>
+       ${order.customerComment ? `<p><b>Mențiuni:</b> ${esc(order.customerComment)}</p>` : ''}
+       <ul>${this.itemsHtml(order.items)}</ul>
+       <p>1) Creează rezervarea în RateHawk cu plata prin link și comisionul vostru.<br/>
+          2) Lipește linkul în <a href="${admin}">panoul de admin</a> – clientul îl primește automat pe email.</p>`,
+    );
+  }
+
+  async paymentLink(order: Order, items: OrderItem[]) {
+    const d = (items[0]?.details ?? {}) as Record<string, any>;
+    await this.send(
+      order.customerEmail,
+      `Link de plată pentru rezervarea #${order.partnerOrderId}`,
+      `<p>Bună, ${esc(order.customerFirstName)}!</p>
+       <p>Camera ta la <b>${esc(d.title)}</b> (${esc(d.checkin)} → ${esc(d.checkout)}) este disponibilă.</p>
+       <p><a href="${esc(order.paymentLink)}" style="display:inline-block;padding:12px 20px;background:#0b6bcb;color:#fff;border-radius:8px;text-decoration:none">Plătește în siguranță</a></p>
+       <p>Plata se face direct către furnizorul de servicii turistice (Emerging Travel Group / RateHawk). Linkul are valabilitate limitată – te rugăm să plătești cât mai curând, altfel tariful se poate modifica.</p>
+       <p><a href="${this.orderLink(order)}">Vezi cererea</a></p>`,
+    );
+  }
+
+  async requestRejected(order: Order, reason: string) {
+    await this.send(
+      order.customerEmail,
+      `Cererea #${order.partnerOrderId} nu a putut fi onorată`,
+      `<p>Bună, ${esc(order.customerFirstName)}!</p><p>Ne pare rău, cererea ta nu a putut fi onorată: ${esc(reason)}</p>
+       <p>Nu ți s-a debitat nicio sumă. Te așteptăm să alegi o altă ofertă pe site.</p>`,
+    );
+  }
 }
